@@ -430,6 +430,10 @@ export async function step(
   await mutate(ownerId, (ws) => {
     const m = ws.missions.find((m) => m.id === missionId);
     if (!m) throw new Error("Mission not found.");
+    if (m.repository)
+      throw new Error(
+        "This mission is handled by the connected repository runner.",
+      );
     if (m.status !== "running") throw new Error("Mission is not running.");
     if (m.leaseUntil && m.leaseUntil > Date.now())
       throw new Error("A teammate is already working.");

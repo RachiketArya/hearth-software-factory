@@ -1,3 +1,4 @@
+import { attachStudio, studioEnabled } from "@/lib/studio";
 import { z } from "zod";
 import { access, accessInfo, requireOwner, displayName } from "@/lib/access";
 import { env } from "cloudflare:workers";
@@ -17,6 +18,7 @@ export async function GET(req: Request) {
       {
         ...(await read(a.workspaceId)),
         access: await accessInfo(a),
+        studioConnected: studioEnabled(a.workspaceId),
         connected: a.role === "owner" && !!(env as any).OPENAI_API_KEY,
         model: (env as any).OPENAI_MODEL || "gpt-5.2",
       },
@@ -49,6 +51,7 @@ const action = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("mission"),
+    target: z.enum(["browser", "chatjipiti-game"]).optional(),
     teamId: id,
     prompt: z.string().trim().min(10).max(6000),
     mode: z.enum(["demo", "live"]),
@@ -115,6 +118,23 @@ export async function POST(req: Request) {
           a.mode,
           ws.agents.filter((v) => v.teamId === a.teamId),
         );
+        if (
+          a.target === "chatjipiti-game" ||
+          (a.mode === "live" && /chatjipiti-game/i.test(a.prompt))
+        ) {
+          if (!studioEnabled(auth.workspaceId))
+            throw new Error(
+              "The studio runner is not connected for this workspace.",
+            );
+          if (a.mode !== "live")
+            throw new Error("Choose live agents for studio missions.");
+          const available = new Set(
+            ws.agents.filter((x) => x.teamId === a.teamId).map((x) => x.role),
+          );
+          if (!["frontend", "qa"].every((x) => available.has(x as any)))
+            throw new Error("Studio teams need frontend and QA teammates.");
+          attachStudio(mission);
+        }
         mission.maxTokens = a.maxTokens || 60000;
         ws.missions.unshift(mission);
       } else {
@@ -158,6 +178,10 @@ export async function POST(req: Request) {
         }
         if (a.action === "control") {
           if (a.command === "return") {
+            if (m.repository)
+              throw new Error(
+                "Studio work is returned through its repository release.",
+              );
             if (
               !["review", "complete"].includes(m.status) ||
               !m.parentMissionId
@@ -193,6 +217,10 @@ export async function POST(req: Request) {
               "Paused the mission. Any current step will finish and save; no new step will start.",
             );
           } else if (a.command === "launch") {
+            if (m.repository)
+              throw new Error(
+                "The studio runner publishes the tested commit automatically.",
+              );
             if (m.status !== "review")
               throw new Error(
                 "Finish the mission and review the deliverables first.",
@@ -217,6 +245,14 @@ export async function POST(req: Request) {
               throw new Error(
                 "Update this mission’s budget to continue. Completed work is saved.",
               );
+            if (m.repository && m.leaseUntil && m.leaseUntil > Date.now())
+              throw new Error(
+                "The runner is still finishing its current action. Wait for it to pause.",
+              );
+            if (m.repository) {
+              delete m.lease;
+              delete m.leaseUntil;
+            }
             m.status = "running";
             if (m.tasks[m.step]?.status === "blocked")
               m.tasks[m.step].status = "queued";
@@ -231,6 +267,10 @@ export async function POST(req: Request) {
           }
         }
         if (a.action === "collaborate") {
+          if (m.repository)
+            throw new Error(
+              "Send guidance to this studio team instead of copying an active repository run.",
+            );
           if (a.teamId === m.teamId)
             throw new Error("Choose a different team.");
           const team = ws.teams.find((t) => t.id === a.teamId);

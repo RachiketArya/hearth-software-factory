@@ -43,7 +43,23 @@ export type Artifact = {
   type: "html" | "markdown" | "code";
   agent: string;
 };
+export type RepositoryRun = {
+  repo: string;
+  siteUrl: string;
+  phase: string;
+  branch?: string;
+  baseSha?: string;
+  commitSha?: string;
+  prUrl?: string;
+  deploymentId?: string;
+  checks: { name: string; status: "passed" | "failed"; detail: string }[];
+  claimedAt?: string;
+  runUrl?: string;
+  usageIds?: string[];
+  lastHeartbeat?: string;
+};
 export type Mission = {
+  repository?: RepositoryRun;
   id: string;
   teamId: string;
   title: string;

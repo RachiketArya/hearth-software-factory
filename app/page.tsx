@@ -71,6 +71,7 @@ const seed: Workspace = {
 };
 type Snapshot = {
   access?: WorkspaceAccess;
+  studioConnected?: boolean;
   workspace: Workspace;
   revision: number;
   connected?: boolean;
@@ -116,6 +117,8 @@ function time(at: string) {
 export default function Page() {
   const [sharing, setSharing] = useState(false),
     [access, setAccess] = useState<WorkspaceAccess | null>(null);
+  const [studioConnected, setStudioConnected] = useState(false),
+    [target, setTarget] = useState("browser");
   const isOwner = access?.role === "owner",
     canGuide = isOwner || access?.role === "collaborator";
   const [ws, setWs] = useState<Workspace>(seed),
@@ -157,6 +160,7 @@ export default function Page() {
     }
     setLoaded(true);
     if (s.access) setAccess(s.access);
+    if (s.studioConnected !== undefined) setStudioConnected(s.studioConnected);
     if (s.connected !== undefined) setServerConnected(s.connected);
   }, []);
   const reload = useCallback(async () => {
@@ -219,6 +223,7 @@ export default function Page() {
       if (flight.current || !isOwner) return;
       const m = wsRef.current.missions.find(
         (m) =>
+          !m.repository &&
           m.status === "running" &&
           (!m.leaseUntil || m.leaseUntil < Date.now()),
       );
@@ -341,7 +346,7 @@ export default function Page() {
     setInstructions(a.instructions);
   };
   const createMission = async () => {
-    if (mode === "live" && !connected) {
+    if (mode === "live" && target !== "chatjipiti-game" && !connected) {
       setModal("settings");
       return;
     }
@@ -351,6 +356,7 @@ export default function Page() {
       prompt,
       mode,
       maxTokens: Number(budget),
+      target,
     });
     if (r) {
       setMissionId(r.workspace.missions[0].id);
@@ -379,6 +385,7 @@ export default function Page() {
     if (
       ["start", "resume"].includes(command) &&
       mission.mode === "live" &&
+      !mission.repository &&
       !connected
     ) {
       setModal("settings");
@@ -625,7 +632,9 @@ export default function Page() {
               <Office
                 agents={agents}
                 mission={
-                  mission?.mode === "live" && !connected
+                  mission?.mode === "live" &&
+                  target !== "chatjipiti-game" &&
+                  !connected
                     ? { ...mission, status: "paused" }
                     : mission
                 }
@@ -842,9 +851,13 @@ export default function Page() {
                     <span className="subtle">
                       {mission.mode === "demo"
                         ? "Demo · scripted activity, no model calls"
-                        : "Live · " +
-                          mission.tokens.toLocaleString() +
-                          " tokens used"}{" "}
+                        : mission.repository
+                          ? "Cloud studio · " +
+                            mission.tokens.toLocaleString() +
+                            " tokens used"
+                          : "Live · " +
+                            mission.tokens.toLocaleString() +
+                            " tokens used"}{" "}
                       · {done}/{mission.tasks.length} steps
                     </span>
                   </div>
@@ -890,6 +903,7 @@ export default function Page() {
                 />
                 {mission.status === "running" &&
                   mission.mode === "live" &&
+                  !mission.repository &&
                   !connected &&
                   isOwner && (
                     <div className="connection-notice">
@@ -902,6 +916,52 @@ export default function Page() {
                       </button>
                     </div>
                   )}
+                {mission.repository && (
+                  <div className="connection-notice studio-summary">
+                    <b>
+                      ChatJiPiTi studio ·{" "}
+                      {mission.repository.phase.replaceAll("_", " ")}
+                    </b>
+                    <a
+                      href={"https://github.com/" + mission.repository.repo}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Repository
+                    </a>
+                    {mission.repository.runUrl && (
+                      <a
+                        href={mission.repository.runUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Cloud run & logs
+                      </a>
+                    )}
+                    {mission.repository.commitSha && (
+                      <code>{mission.repository.commitSha.slice(0, 12)}</code>
+                    )}
+                    {mission.repository.prUrl && (
+                      <a
+                        href={mission.repository.prUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Review changes
+                      </a>
+                    )}
+                    <span>
+                      {mission.repository.checks
+                        .map((c) => `${c.name}: ${c.status}`)
+                        .join(" · ") ||
+                        "Tests and build results will appear here."}
+                    </span>
+                    <small>
+                      The cloud runner checks the queue about every five
+                      minutes. Pause stops it before its next action.
+                    </small>
+                  </div>
+                )}
                 <div className="shared-presence">
                   <button
                     className="text-button"
@@ -954,6 +1014,10 @@ export default function Page() {
                             ? "Retry step"
                             : "Resume"}
                       </button>
+                    ) : mission.status === "review" && mission.repository ? (
+                      <span className="subtle">
+                        Publishing the tested game…
+                      </span>
                     ) : mission.status === "review" ? (
                       <button
                         className="primary"
@@ -971,10 +1035,12 @@ export default function Page() {
                       <a
                         className="primary"
                         href={
-                          "/play/" +
-                          mission.id +
-                          "?workspace=" +
-                          encodeURIComponent(access?.workspaceId || "")
+                          mission.repository
+                            ? mission.repository.siteUrl
+                            : "/play/" +
+                              mission.id +
+                              "?workspace=" +
+                              encodeURIComponent(access?.workspaceId || "")
                         }
                         target="_blank"
                         rel="noreferrer"
@@ -1294,10 +1360,38 @@ export default function Page() {
           ) : (
             <div className="connection-notice">
               <span className="live-dot" />
-              {connected
-                ? "Model connected for live work."
-                : "Connect your model in Settings to run live agents."}
+              {target === "chatjipiti-game"
+                ? "Studio missions use the connected repository runner."
+                : connected
+                  ? "Model connected for live work."
+                  : "Connect your model in Settings to run live agents."}
             </div>
+          )}
+          {mode === "live" && (
+            <>
+              <label className="field-label" htmlFor="mission-target">
+                Build destination
+              </label>
+              <select
+                className="text-input"
+                id="mission-target"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+              >
+                <option value="browser">Standalone browser app</option>
+                <option value="chatjipiti-game" disabled={!studioConnected}>
+                  ChatJiPiTi game studio
+                  {!studioConnected ? " — runner not connected" : ""}
+                </option>
+              </select>
+              {target === "chatjipiti-game" && (
+                <p className="help-copy">
+                  The team reads existing games, works on a repository branch,
+                  runs tests, and releases to the studio. Uses the connected
+                  cloud runner, even while your Mac is off.
+                </p>
+              )}
+            </>
           )}
           <label className="field-label" htmlFor="brief">
             What should the team build?
@@ -1314,9 +1408,9 @@ export default function Page() {
           {mode === "live" && (
             <>
               <p className="help-copy">
-                This version builds self-contained browser apps and documents.
-                It can review source and revise files; it cannot run a terminal
-                or browser tests.
+                {target === "chatjipiti-game"
+                  ? "Cloud teammates read the studio repository, build a new game, run tests and publish it automatically. API tokens count toward this mission budget."
+                  : "Browser missions build self-contained apps and documents. They review source but do not execute terminal or browser tests."}
               </p>
               <label className="field-label" htmlFor="budget">
                 Mission token budget
@@ -1339,7 +1433,9 @@ export default function Page() {
             onClick={createMission}
           >
             <Plus size={16} />
-            {mode === "live" && !connected ? "Connect model" : "Create mission"}
+            {mode === "live" && target !== "chatjipiti-game" && !connected
+              ? "Connect model"
+              : "Create mission"}
           </button>
         </DialogContent>
       </Dialog>
