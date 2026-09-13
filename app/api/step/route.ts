@@ -1,9 +1,12 @@
+import { access, requireOwner } from "@/lib/access";
 import { step } from "@/lib/runner";
 import { owner, checkOrigin } from "@/lib/store";
 export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     checkOrigin(req);
+    const auth = await access(req);
+    requireOwner(auth);
     const body = (await req.json()) as { id?: string; model?: string };
     if (typeof body.id !== "string" || body.id.length > 100)
       throw new Error("Mission ID required.");
@@ -11,7 +14,7 @@ export async function POST(req: Request) {
       throw new Error("Invalid model name.");
     return Response.json(
       await step(
-        owner(req),
+        auth.workspaceId,
         body.id,
         req.headers.get("x-model-key") || undefined,
         body.model,

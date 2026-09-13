@@ -39,6 +39,8 @@ import {
   roles,
   isPlayableArtifact,
 } from "@/lib/domain";
+import Sharing, { JoinInvitation } from "@/components/hearth/sharing";
+import { workspaceHeaders, WorkspaceAccess } from "@/lib/client-workspace";
 import { safeDocument } from "@/lib/sandbox";
 import {
   Dialog,
@@ -68,6 +70,7 @@ const seed: Workspace = {
   missions: [],
 };
 type Snapshot = {
+  access?: WorkspaceAccess;
   workspace: Workspace;
   revision: number;
   connected?: boolean;
@@ -111,6 +114,10 @@ function time(at: string) {
   });
 }
 export default function Page() {
+  const [sharing, setSharing] = useState(false),
+    [access, setAccess] = useState<WorkspaceAccess | null>(null);
+  const isOwner = access?.role === "owner",
+    canGuide = isOwner || access?.role === "collaborator";
   const [ws, setWs] = useState<Workspace>(seed),
     [loaded, setLoaded] = useState(false),
     [teamId, setTeamId] = useState(""),
@@ -149,13 +156,25 @@ export default function Page() {
       setWs(s.workspace);
     }
     setLoaded(true);
+    if (s.access) setAccess(s.access);
     if (s.connected !== undefined) setServerConnected(s.connected);
   }, []);
   const reload = useCallback(async () => {
     try {
-      const r = await fetch("/api/workspace", { cache: "no-store" });
+      const r = await fetch("/api/workspace", {
+        cache: "no-store",
+        headers: workspaceHeaders(),
+      });
       const s = (await r.json()) as Snapshot & { error?: string };
-      if (!r.ok) throw new Error(s.error || "Could not load workspace.");
+      if (!r.ok) {
+        if (r.status === 403) {
+          setWs(seed);
+          setAccess(null);
+          setLoaded(false);
+          revision.current = -1;
+        }
+        throw new Error(s.error || "Could not load workspace.");
+      }
       accept(s);
       return s;
     } catch (e) {
@@ -175,7 +194,10 @@ export default function Page() {
       try {
         const r = await fetch("/api/workspace", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...workspaceHeaders(),
+          },
           body: JSON.stringify(action),
         });
         const s = (await r.json()) as Snapshot & { error?: string };
@@ -194,7 +216,7 @@ export default function Page() {
   useEffect(() => {
     let alive = true;
     const tick = async () => {
-      if (flight.current) return;
+      if (flight.current || !isOwner) return;
       const m = wsRef.current.missions.find(
         (m) =>
           m.status === "running" &&
@@ -209,6 +231,7 @@ export default function Page() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...workspaceHeaders(),
             ...(apiKey ? { "x-model-key": apiKey } : {}),
           },
           body: JSON.stringify({ id: m.id, model }),
@@ -236,7 +259,7 @@ export default function Page() {
       alive = false;
       clearInterval(t);
     };
-  }, [apiKey, serverConnected, model, accept, reload]);
+  }, [apiKey, serverConnected, model, accept, reload, isOwner]);
   useEffect(() => {
     const context = (document as any).modelContext;
     if (!context?.registerTool) return;
@@ -383,20 +406,24 @@ export default function Page() {
     ) || [];
   return (
     <div className="app-shell">
+      <Sharing open={sharing} onClose={() => setSharing(false)} />
+      <JoinInvitation />
       <aside className="leftbar">
         <a className="brand" href="/">
           <span className="brandmark">h</span>hearth
           <span className="beta">beta</span>
         </a>
-        <button
-          className="workspace-switch"
-          onClick={() => setModal("settings")}
-        >
+        <button className="workspace-switch" onClick={() => setSharing(true)}>
           <span className="workspace-letter">S</span>
           <span>
-            Studio workspace<small>Your little big company</small>
+            {isOwner ? "Your workspace" : "Shared workspace"}
+            <small>{access?.role || "Connecting…"}</small>
           </span>
           <ChevronDown size={15} />
+        </button>
+        <button className="nav-item" onClick={() => setSharing(true)}>
+          <Users size={18} />
+          People & sharing
         </button>
         <div className="sidebar-label">Workspace</div>
         <button
@@ -514,7 +541,13 @@ export default function Page() {
               <Radio size={13} />
               {mission?.mode === "live" ? "Live agents" : "Demo mode"}
             </button>
-            <span className="top-avatar">R</span>
+            <button
+              className="top-avatar"
+              title="People & sharing"
+              onClick={() => setSharing(true)}
+            >
+              {access?.name.slice(0, 1).toUpperCase() || "?"}
+            </button>
           </div>
         </header>
         <div className="page-heading">
@@ -538,7 +571,7 @@ export default function Page() {
           </div>
           <button
             className="primary"
-            disabled={!loaded}
+            disabled={!loaded || !isOwner}
             onClick={() => setModal("mission")}
           >
             <Plus size={17} />
@@ -834,7 +867,9 @@ export default function Page() {
                     </span>
                     <button
                       className="text-button"
-                      disabled={busy || mission.status === "running"}
+                      disabled={
+                        busy || !isOwner || mission.status === "running"
+                      }
                       onClick={openBudget}
                     >
                       Adjust budget
@@ -855,7 +890,8 @@ export default function Page() {
                 />
                 {mission.status === "running" &&
                   mission.mode === "live" &&
-                  !connected && (
+                  !connected &&
+                  isOwner && (
                     <div className="connection-notice">
                       <span>Waiting for a model connection.</span>
                       <button
@@ -866,12 +902,34 @@ export default function Page() {
                       </button>
                     </div>
                   )}
+                <div className="shared-presence">
+                  <button
+                    className="text-button"
+                    onClick={() => setSharing(true)}
+                  >
+                    People & sharing
+                  </button>
+                  {access?.people.map((p) => (
+                    <span key={p.user_id}>
+                      <i className="presence-dot" />
+                      {p.name}
+                      {p.user_id === access.userId ? " (you)" : ""}
+                    </span>
+                  ))}
+                  {!isOwner && (
+                    <span>
+                      {canGuide
+                        ? "Collaborator · send guidance or pause work"
+                        : "Viewer · read-only access"}
+                    </span>
+                  )}
+                </div>
                 <div className="mission-controls">
                   <div>
                     {mission.status === "running" ? (
                       <button
                         className="secondary"
-                        disabled={busy}
+                        disabled={busy || !canGuide}
                         onClick={() => control("pause")}
                       >
                         <Pause size={14} />
@@ -882,7 +940,7 @@ export default function Page() {
                       ) ? (
                       <button
                         className="primary"
-                        disabled={busy}
+                        disabled={busy || !isOwner}
                         onClick={() =>
                           control(
                             mission.status === "ready" ? "start" : "resume",
@@ -901,6 +959,7 @@ export default function Page() {
                         className="primary"
                         disabled={
                           busy ||
+                          !isOwner ||
                           !mission.artifacts.some((a) => isPlayableArtifact(a))
                         }
                         onClick={() => control("launch")}
@@ -911,7 +970,12 @@ export default function Page() {
                     ) : (
                       <a
                         className="primary"
-                        href={"/play/" + mission.id}
+                        href={
+                          "/play/" +
+                          mission.id +
+                          "?workspace=" +
+                          encodeURIComponent(access?.workspaceId || "")
+                        }
                         target="_blank"
                         rel="noreferrer"
                       >
@@ -939,7 +1003,7 @@ export default function Page() {
                     ["review", "complete"].includes(mission.status) && (
                       <button
                         className="secondary"
-                        disabled={busy}
+                        disabled={busy || !isOwner}
                         onClick={() => control("return")}
                       >
                         Return work
@@ -957,7 +1021,7 @@ export default function Page() {
                   <p className="execution-note">
                     {mission.mode === "demo"
                       ? "Demo is playing."
-                      : "Keep this office open to continue agent handoffs."}{" "}
+                      : "The owner keeps an office tab open to continue agent handoffs."}{" "}
                     You can switch teams while work continues.
                   </p>
                 )}
@@ -980,7 +1044,7 @@ export default function Page() {
                 </div>
                 <button
                   className="secondary"
-                  disabled={!loaded}
+                  disabled={!loaded || !isOwner}
                   onClick={() => {
                     setMode("demo");
                     setPrompt(pinballPrompt);
@@ -1032,7 +1096,16 @@ export default function Page() {
                       </div>
                       <div>
                         <div className="event-meta">
-                          <b>{e.actor}</b>
+                          <b
+                            title={
+                              e.humanId
+                                ? "Workspace member · " + e.humanId
+                                : undefined
+                            }
+                          >
+                            {e.actor}
+                            {e.humanId === access?.userId ? " (you)" : ""}
+                          </b>
                           <time>{time(e.at)}</time>
                         </div>
                         <p>{e.text}</p>
@@ -1068,7 +1141,7 @@ export default function Page() {
                   />
                   <button
                     type="submit"
-                    disabled={busy || !message.trim()}
+                    disabled={busy || !canGuide || !message.trim()}
                     aria-label="Send team message"
                   >
                     <ArrowUp size={17} />
@@ -1170,6 +1243,7 @@ export default function Page() {
             className="primary"
             disabled={
               busy ||
+              !isOwner ||
               !mission ||
               Number(budget) < Math.max(10000, mission.tokens) ||
               Number(budget) > 200000
@@ -1261,7 +1335,7 @@ export default function Page() {
           )}
           <button
             className="primary"
-            disabled={busy || prompt.trim().length < 10}
+            disabled={busy || !isOwner || prompt.trim().length < 10}
             onClick={createMission}
           >
             <Plus size={16} />
@@ -1294,7 +1368,7 @@ export default function Page() {
               <button
                 className="template-card"
                 key={t.id}
-                disabled={busy || !loaded}
+                disabled={busy || !isOwner || !loaded}
                 onClick={async () => {
                   const r = await mutate({
                     action: "team",
@@ -1375,7 +1449,10 @@ export default function Page() {
           <button
             className="primary"
             disabled={
-              busy || instructions.trim().length < 30 || !agentName.trim()
+              busy ||
+              !isOwner ||
+              instructions.trim().length < 30 ||
+              !agentName.trim()
             }
             onClick={async () => {
               const r = await mutate({
@@ -1405,7 +1482,7 @@ export default function Page() {
               />
               <button
                 className="secondary"
-                disabled={busy || !message.trim()}
+                disabled={busy || !canGuide || !message.trim()}
                 onClick={sendMessage}
               >
                 <Send size={14} />
@@ -1554,6 +1631,7 @@ export default function Page() {
                 className="primary"
                 disabled={
                   busy ||
+                  !isOwner ||
                   !collabTeam ||
                   collabTeam === team.id ||
                   collabBrief.trim().length < 10

@@ -1,12 +1,15 @@
 import { isPlayableArtifact } from "@/lib/domain";
 import { headers } from "next/headers";
+import { resolveAccess } from "@/lib/access";
 import { read } from "@/lib/store";
 import { safeDocument } from "@/lib/sandbox";
 export const dynamic = "force-dynamic";
 export default async function Play({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ workspace?: string }>;
 }) {
   const { id } = await params;
   const h = await headers();
@@ -24,7 +27,21 @@ export default async function Play({
         <a href="/signin-with-chatgpt?return_to=/">Sign in</a>
       </main>
     );
-  const { workspace } = await read(owner);
+  let workspaceId: string;
+  try {
+    workspaceId = (
+      await resolveAccess(owner, (await searchParams).workspace || owner)
+    ).workspaceId;
+  } catch {
+    return (
+      <main className="empty-view">
+        <h1>This workspace is private.</h1>
+        <a href="/">Back to your office</a>
+      </main>
+    );
+  }
+  const officeUrl = "/?workspace=" + encodeURIComponent(workspaceId);
+  const { workspace } = await read(workspaceId);
   const m = workspace.missions.find(
     (m) => m.id === id && m.status === "complete",
   );
@@ -46,7 +63,7 @@ export default async function Play({
           background: "#f5f7f0",
         }}
       >
-        <a href="/">← Back to Hearth</a>
+        <a href={officeUrl}>← Back to Hearth</a>
         <span>
           {m?.title} ·{" "}
           {m?.mode === "demo" ? "Demo artifact" : "Team deliverable"}

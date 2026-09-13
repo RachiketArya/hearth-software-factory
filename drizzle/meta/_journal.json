@@ -8,6 +8,13 @@
       "when": 1789271579995,
       "tag": "0000_outstanding_the_professor",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789277101754,
+      "tag": "0001_elite_silver_surfer",
+      "breakpoints": true
     }
   ]
 }

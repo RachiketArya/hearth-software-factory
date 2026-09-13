@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { access, accessInfo, requireOwner, displayName } from "@/lib/access";
 import { env } from "cloudflare:workers";
 import { read, mutate, owner, checkOrigin } from "@/lib/store";
 import {
@@ -11,16 +12,21 @@ import { event } from "@/lib/runner";
 export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
+    const a = await access(req);
     return Response.json(
       {
-        ...(await read(owner(req))),
-        connected: !!(env as any).OPENAI_API_KEY,
+        ...(await read(a.workspaceId)),
+        access: await accessInfo(a),
+        connected: a.role === "owner" && !!(env as any).OPENAI_API_KEY,
         model: (env as any).OPENAI_MODEL || "gpt-5.2",
       },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (e) {
-    return Response.json({ error: (e as Error).message }, { status: 503 });
+    return Response.json(
+      { error: (e as Error).message },
+      { status: (e as { status?: number }).status || 503 },
+    );
   }
 }
 const id = z.string().min(1).max(100);
@@ -72,7 +78,21 @@ export async function POST(req: Request) {
     if (Number(req.headers.get("content-length") || 0) > 20000)
       throw new Error("Request too large.");
     const a = action.parse(await req.json());
-    const result = await mutate(owner(req), (ws) => {
+    const auth = await access(req);
+    if (
+      auth.role !== "owner" &&
+      !(
+        auth.role === "collaborator" &&
+        (a.action === "message" ||
+          (a.action === "control" && a.command === "pause"))
+      )
+    )
+      requireOwner(auth);
+    const actor = await displayName(auth.userId);
+    const result = await mutate(auth.workspaceId, (ws) => {
+      const priorEvents = new Set(
+        ws.missions.flatMap((m) => m.events.map((e) => e.id)),
+      );
       if (a.action === "team") {
         if (ws.teams.length >= 12)
           throw new Error("This workspace supports up to 12 teams.");
@@ -118,7 +138,7 @@ export async function POST(req: Request) {
             delete m.budgetRequiredTotal;
           event(
             m,
-            "You",
+            actor,
             "budget",
             `Changed the mission budget from ${previous.toLocaleString()} to ${a.maxTokens.toLocaleString()} tokens. Completed work and usage are preserved.`,
           );
@@ -131,7 +151,7 @@ export async function POST(req: Request) {
             throw new Error("Teammate not found in this team.");
           event(
             m,
-            "You",
+            actor,
             "message",
             `${agent ? "@" + agent.name + " " : ""}${a.text}`,
           );
@@ -158,7 +178,7 @@ export async function POST(req: Request) {
             );
             event(
               m,
-              "You",
+              actor,
               "handoff",
               "Returned completed work to the original team.",
             );
@@ -168,7 +188,7 @@ export async function POST(req: Request) {
             m.status = "paused";
             event(
               m,
-              "You",
+              actor,
               "control",
               "Paused the mission. Any current step will finish and save; no new step will start.",
             );
@@ -184,7 +204,7 @@ export async function POST(req: Request) {
             m.status = "complete";
             event(
               m,
-              "You",
+              actor,
               "launch",
               "Launched the app to a private workspace link.",
             );
@@ -202,7 +222,7 @@ export async function POST(req: Request) {
               m.tasks[m.step].status = "queued";
             event(
               m,
-              "You",
+              actor,
               "control",
               a.command === "start"
                 ? "Started the mission."
@@ -234,15 +254,25 @@ export async function POST(req: Request) {
           );
           event(
             m,
-            "You",
+            actor,
             "handoff",
             `Asked ${team.name} to collaborate: ${a.brief}`,
           );
           ws.missions.unshift(other);
         }
       }
+      for (const m of ws.missions)
+        for (const e of m.events) {
+          if (
+            !priorEvents.has(e.id) &&
+            (e.actor === actor || e.actor === "You")
+          ) {
+            e.actor = actor;
+            e.humanId = auth.userId;
+          }
+        }
     });
-    return Response.json(result);
+    return Response.json({ ...result, access: await accessInfo(auth) });
   } catch (e) {
     return Response.json(
       {
@@ -251,7 +281,7 @@ export async function POST(req: Request) {
             ? "Please check the required fields and text lengths."
             : (e as Error).message,
       },
-      { status: 400 },
+      { status: (e as { status?: number }).status || 400 },
     );
   }
 }

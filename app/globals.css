@@ -1704,3 +1704,76 @@ h1 {
   color: #76876c;
   margin-top: 10px;
 }
+
+.sharing-dialog {
+  max-height: 85vh;
+  overflow-y: auto;
+  max-width: 600px;
+}
+.share-inline,
+.share-person {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.share-inline .text-input {
+  flex: 1;
+  min-width: 0;
+}
+.share-inline button {
+  flex-shrink: 0;
+}
+.share-section {
+  border-top: 1px solid #dfe4da;
+  padding-top: 18px;
+  margin-top: 10px;
+}
+.share-section h3 {
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+.share-section .subtle {
+  line-height: 1.55;
+  display: block;
+  margin: 10px 0;
+}
+.share-person {
+  padding: 10px 0;
+  border-bottom: 1px solid #eef0e9;
+}
+.share-person small {
+  display: block;
+  color: #75816e;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.invite-result {
+  padding: 14px;
+  background: #eef4e7;
+  border-radius: 12px;
+  margin-top: 14px;
+}
+.invite-result button {
+  margin-top: 10px;
+}
+.sharing-error {
+  color: #b33131;
+}
+.shared-presence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  color: #67735d;
+  font-size: 12px;
+}
+.shared-presence .presence-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7c9f5c;
+  display: inline-block;
+  margin-right: 5px;
+}

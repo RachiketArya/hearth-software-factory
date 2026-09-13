@@ -28,6 +28,7 @@ export type Event = {
   at: string;
   kind: string;
   actor: string;
+  humanId?: string;
   text: string;
   tokens?: number;
   inputTokens?: number;
