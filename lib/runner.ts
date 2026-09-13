@@ -69,7 +69,18 @@ export class BudgetPause extends Error {
 }
 
 export function latestArtifacts(mission: Mission) {
-  return [...new Map(mission.artifacts.map((a) => [a.name, a])).values()];
+  const files = new Map<string, Mission["artifacts"][number]>();
+  for (const artifact of mission.artifacts) {
+    // Legacy reviews occasionally reused index.html for Markdown notes.
+    if (
+      files.has(artifact.name) &&
+      isPlayableArtifact(files.get(artifact.name)!) &&
+      !isPlayableArtifact(artifact)
+    )
+      continue;
+    files.set(artifact.name, artifact);
+  }
+  return [...files.values()];
 }
 
 export function modelPayload(agent: Agent, mission: Mission, model: string) {
@@ -152,7 +163,10 @@ export function modelPayload(agent: Agent, mission: Mission, model: string) {
                 properties: {
                   name: {
                     type: "string",
-                    pattern: "^[a-zA-Z0-9_.-]+$",
+                    pattern:
+                      agent.role === "qa"
+                        ? "^qa-review\\.md$"
+                        : "^[a-zA-Z0-9_.-]+$",
                     maxLength: 100,
                   },
                   type: {
@@ -334,6 +348,12 @@ export async function execute(
         "The teammate returned an invalid artifact format. No files were replaced. Retry the step; this attempt’s tokens are included in usage.",
       );
     const parsed = validation.data;
+    if (agent.role === "qa") {
+      parsed.artifacts = parsed.artifacts.map((a) => ({
+        ...a,
+        name: "qa-review.md",
+      }));
+    }
     if (
       agent.role === "frontend" &&
       !parsed.artifacts.some(

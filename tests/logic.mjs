@@ -187,6 +187,18 @@ duplicated.events = [
   { kind: "review", actor: "QA", text: "STALE REVIEW" },
   { kind: "message", actor: "Human", text: "USER REQUIREMENT" },
 ];
+duplicated.artifacts.push({
+  id: "bad-review",
+  name: "index.html",
+  type: "markdown",
+  content: "MISNAMED REVIEW",
+});
+assert.equal(
+  runner.exports
+    .latestArtifacts(duplicated)
+    .find((a) => a.name === "index.html").content,
+  "NEW",
+);
 const qa = runner.exports.modelPayload(
   { ...agent, role: "qa" },
   duplicated,
@@ -341,4 +353,35 @@ await assert.rejects(
 );
 console.log(
   "PASS: targeted edits preserve original versions, ambiguous edits fail atomically, revision output is bounded, and invalid-output token usage is retained.",
+);
+
+reply = {
+  status: "completed",
+  output: [
+    {
+      content: [
+        {
+          type: "output_text",
+          text: JSON.stringify({
+            summary: "Reviewed",
+            artifacts: [
+              { name: "index.html", type: "markdown", content: "No blockers" },
+            ],
+            request_changes: null,
+          }),
+        },
+      ],
+    },
+  ],
+  usage: { total_tokens: 120 },
+};
+const reviewResult = await runner.exports.execute(
+  { ...agent, role: "qa" },
+  mission,
+  "test-key",
+  "test-model",
+);
+assert.equal(reviewResult.artifacts[0].name, "qa-review.md");
+console.log(
+  "PASS: review notes cannot replace a playable app, including legacy misnamed files.",
 );
