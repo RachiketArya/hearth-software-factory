@@ -19,6 +19,7 @@
   --destructive: #ad4646;
   --border: #e4e8df;
   --input: #d9dfd4;
+  --placeholder: #65705f;
   --ring: #739a67;
   --radius: 0.6rem;
   --sidebar: #f7f8f3;
@@ -64,6 +65,13 @@ a,
 input,
 textarea {
   font: inherit;
+  color: var(--foreground);
+  caret-color: var(--primary);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--placeholder);
+  opacity: 1;
 }
 button,
 a {
@@ -757,6 +765,8 @@ h1 {
   border: 1px solid #d9e0d1;
   border-radius: 8px;
   padding: 13px;
+  background: #fff;
+  color: var(--foreground);
   font-size: 14px;
   line-height: 1.7;
   resize: vertical;
@@ -1029,16 +1039,17 @@ h1 {
   font-weight: 550;
   display: block;
 }
-.text-input {
+.hearth-text-input {
   border: 1px solid #d9e0d1;
   border-radius: 7px;
   padding: 10px 12px;
   background: #fff;
+  color: var(--foreground);
   width: 100%;
   font-size: 14px;
   min-height: 42px;
 }
-.text-input:focus,
+.hearth-text-input:focus,
 .mission-input:focus {
   outline: 2px solid #92aa80;
   outline-offset: 1px;
@@ -1717,7 +1728,7 @@ h1 {
   align-items: center;
   justify-content: space-between;
 }
-.share-inline .text-input {
+.share-inline .hearth-text-input {
   flex: 1;
   min-width: 0;
 }

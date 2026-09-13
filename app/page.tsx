@@ -1295,7 +1295,7 @@ export default function Page() {
           </label>
           <input
             id="mission-budget-update"
-            className="text-input"
+            className="hearth-text-input"
             type="number"
             min={Math.max(10000, mission?.tokens || 0)}
             max="200000"
@@ -1375,7 +1375,7 @@ export default function Page() {
                 Build destination
               </label>
               <select
-                className="text-input"
+                className="hearth-text-input"
                 id="mission-target"
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
@@ -1419,7 +1419,7 @@ export default function Page() {
               </label>
               <input
                 id="budget"
-                className="text-input"
+                className="hearth-text-input"
                 type="number"
                 min="10000"
                 max="200000"
@@ -1455,7 +1455,7 @@ export default function Page() {
           </label>
           <input
             id="team-name"
-            className="text-input"
+            className="hearth-text-input"
             placeholder="e.g. Launch crew"
             maxLength={40}
             value={teamName}
@@ -1516,7 +1516,7 @@ export default function Page() {
             Name
           </label>
           <input
-            className="text-input"
+            className="hearth-text-input"
             id="agent-name"
             value={agentName}
             onChange={(e) => setAgentName(e.target.value)}
@@ -1619,7 +1619,7 @@ export default function Page() {
           </label>
           <input
             id="api-key"
-            className="text-input"
+            className="hearth-text-input"
             type="password"
             autoComplete="off"
             placeholder="sk-…"
@@ -1636,7 +1636,7 @@ export default function Page() {
           </label>
           <input
             id="model-name"
-            className="text-input"
+            className="hearth-text-input"
             value={model}
             onChange={(e) => setModel(e.target.value)}
             placeholder="gpt-5.2"
