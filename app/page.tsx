@@ -1087,7 +1087,9 @@ export default function Page() {
                   <p className="execution-note">
                     {mission.mode === "demo"
                       ? "Demo is playing."
-                      : "The owner keeps an office tab open to continue agent handoffs."}{" "}
+                      : mission.repository
+                        ? "The cloud team keeps working even when this tab is closed."
+                        : "The owner keeps an office tab open to continue agent handoffs."}{" "}
                     You can switch teams while work continues.
                   </p>
                 )}
