@@ -94,10 +94,17 @@ const runner = {
   exports: {},
   require(name) {
     if (name === "zod") return require("zod");
+    if (name === "./domain")
+      return {
+        isPlayableArtifact: (a) =>
+          a.type === "html" && /\.html?$/i.test(a.name),
+      };
     if (name === "cloudflare:workers") return { env: {} };
     return {};
   },
   fetch: async (url, options) => {
+    if (url.endsWith("/input_tokens"))
+      return { ok: true, json: async () => ({ input_tokens: 100 }) };
     assert.equal(url, "https://api.openai.com/v1/responses");
     captured = JSON.parse(options.body);
     return { ok: true, json: async () => reply };
@@ -140,7 +147,7 @@ assert.equal(captured.model, "test-model");
 reply = { ...reply, status: "incomplete" };
 await assert.rejects(
   () => runner.exports.execute(agent, mission, "test-key", "test-model"),
-  /output space/,
+  /output allowance/,
 );
 reply = { status: "completed", output: [] };
 await assert.rejects(
@@ -155,8 +162,183 @@ await assert.rejects(
       "test-key",
       "test-model",
     ),
-  /budget/,
+  /Increase this mission/,
 );
+const duplicated = {
+  ...mission,
+  artifacts: [
+    { id: "old", name: "index.html", type: "html", content: "OLD" },
+    { id: "new", name: "index.html", type: "html", content: "NEW" },
+    {
+      id: "core",
+      name: "snake-core.js",
+      type: "markdown",
+      content: "DUPLICATE CORE",
+    },
+  ],
+};
+duplicated.artifacts.push({
+  id: "review",
+  name: "qa-review.md",
+  type: "markdown",
+  content: "STALE FINDINGS",
+});
+duplicated.events = [
+  { kind: "review", actor: "QA", text: "STALE REVIEW" },
+  { kind: "message", actor: "Human", text: "USER REQUIREMENT" },
+];
+const qa = runner.exports.modelPayload(
+  { ...agent, role: "qa" },
+  duplicated,
+  "test-model",
+);
+assert(qa.input.includes("NEW"));
+assert(!qa.input.includes("OLD"));
+assert(!qa.input.includes("DUPLICATE CORE"));
+assert(!qa.input.includes("STALE"));
+assert(qa.input.includes("USER REQUIREMENT"));
+const delivery = runner.exports.modelPayload(
+  { ...agent, role: "manager" },
+  duplicated,
+  "test-model",
+);
+assert(!delivery.input.includes('"content":"NEW"'));
+assert(delivery.text.format.schema.properties.notes);
+assert(!delivery.text.format.schema.properties.artifacts);
+const backend = runner.exports.modelPayload(
+  { ...agent, role: "backend" },
+  mission,
+  "test-model",
+);
+assert(
+  !backend.text.format.schema.properties.artifacts.items.properties.type.enum.includes(
+    "html",
+  ),
+);
+assert.deepEqual(
+  Array.from(
+    qa.text.format.schema.properties.artifacts.items.properties.type.enum,
+  ),
+  ["markdown"],
+);
+reply = {
+  status: "completed",
+  output: [
+    {
+      content: [
+        {
+          type: "output_text",
+          text: JSON.stringify({
+            summary: "Looks good.",
+            artifacts: [],
+            request_changes: null,
+          }),
+        },
+      ],
+    },
+  ],
+  usage: { total_tokens: 120 },
+};
+const measuredMission = {
+  ...mission,
+  artifacts: [{ name: "large.md", content: "x".repeat(30000) }],
+  tokens: 40000,
+  maxTokens: 55000,
+};
+await runner.exports
+  .execute(agent, measuredMission, "test-key", "test-model")
+  .catch((e) => {
+    if (!e.message.includes("playable")) throw e;
+  });
 console.log(
   "PASS: pinball bumper scoring, flipper impulse, three-life game over, restart, finite physics; live Responses payload, validated artifact output, usage accounting, refusal/incomplete response handling, budget guard. Live provider is mocked; no real model call was made.",
+);
+const editable = {
+  ...mission,
+  tasks: [{ title: "Revise the app" }],
+  artifacts: [
+    {
+      id: "app",
+      name: "index.html",
+      type: "html",
+      content: "<h1>Snake</h1><p>broken</p>",
+    },
+  ],
+};
+reply = {
+  status: "completed",
+  output: [
+    {
+      content: [
+        {
+          type: "output_text",
+          text: JSON.stringify({
+            summary: "Fixed the app.",
+            artifacts: [],
+            edits: [
+              {
+                name: "index.html",
+                find: "<p>broken</p>",
+                replace: "<p>fixed</p>",
+              },
+            ],
+            request_changes: null,
+          }),
+        },
+      ],
+    },
+  ],
+  usage: { total_tokens: 120 },
+};
+const patched = await runner.exports.execute(
+  agent,
+  editable,
+  "test-key",
+  "test-model",
+);
+assert.equal(patched.artifacts[0].content, "<h1>Snake</h1><p>fixed</p>");
+assert.equal(editable.artifacts[0].content, "<h1>Snake</h1><p>broken</p>");
+assert.equal(captured.max_output_tokens, 4000);
+await assert.rejects(
+  () =>
+    runner.exports.execute(
+      agent,
+      {
+        ...editable,
+        artifacts: [
+          { ...editable.artifacts[0], content: "<p>broken</p><p>broken</p>" },
+        ],
+      },
+      "test-key",
+      "test-model",
+    ),
+  (e) => e.message.includes("exactly once") && e.usedTokens === 120,
+);
+reply = {
+  status: "completed",
+  output: [
+    {
+      content: [
+        {
+          type: "output_text",
+          text: JSON.stringify({
+            summary: "Wrong filename.",
+            artifacts: [
+              { name: "src/core.js", type: "markdown", content: "code" },
+            ],
+            edits: [],
+            request_changes: null,
+          }),
+        },
+      ],
+    },
+  ],
+  usage: { total_tokens: 120 },
+};
+await assert.rejects(
+  () => runner.exports.execute(agent, mission, "test-key", "test-model"),
+  (e) => e.message.includes("invalid artifact") && e.usedTokens === 120,
+);
+console.log(
+  "PASS: targeted edits preserve original versions, ambiguous edits fail atomically, revision output is bounded, and invalid-output token usage is retained.",
 );

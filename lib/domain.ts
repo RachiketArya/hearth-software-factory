@@ -30,12 +30,16 @@ export type Event = {
   actor: string;
   text: string;
   tokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  model?: string;
 };
 export type Artifact = {
   id: string;
   name: string;
   content: string;
-  type: "html" | "markdown";
+  type: "html" | "markdown" | "code";
   agent: string;
 };
 export type Mission = {
@@ -50,6 +54,7 @@ export type Mission = {
   artifacts: Artifact[];
   tokens: number;
   maxTokens: number;
+  budgetRequiredTotal?: number;
   createdAt: string;
   step: number;
   parentMissionId?: string;
@@ -192,4 +197,8 @@ export function makeMission(
     step: 0,
     createdAt: new Date().toISOString(),
   };
+}
+
+export function isPlayableArtifact(a: Artifact) {
+  return a.type === "html" && /\.html?$/i.test(a.name);
 }

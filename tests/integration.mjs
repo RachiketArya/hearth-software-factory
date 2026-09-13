@@ -93,6 +93,26 @@ assert.equal(finished.status, 200);
 let m = finished.data.workspace.missions.find((m) => m.id === id);
 assert.equal(m.step, 1);
 assert.equal(m.status, "paused");
+const budgetUpdate = await req("/api/workspace", {
+  action: "budget",
+  id,
+  maxTokens: 70000,
+});
+assert.equal(budgetUpdate.status, 200);
+assert.equal(
+  budgetUpdate.data.workspace.missions.find((v) => v.id === id).maxTokens,
+  70000,
+);
+assert.equal(
+  budgetUpdate.data.workspace.missions.find((v) => v.id === id).step,
+  1,
+);
+assert.equal(
+  (await req("/api/workspace", { action: "budget", id, maxTokens: 999999 }))
+    .status,
+  400,
+);
+
 assert(m.events.some((e) => e.text.includes("preserve keyboard")));
 assert.equal((await req("/api/step", { id })).status, 400);
 await req("/api/workspace", { action: "control", id, command: "resume" });

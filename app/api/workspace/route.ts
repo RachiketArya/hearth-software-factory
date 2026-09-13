@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { read, mutate, owner, checkOrigin } from "@/lib/store";
-import { makeTeam, makeMission, pinballPrompt } from "@/lib/domain";
+import {
+  makeTeam,
+  makeMission,
+  pinballPrompt,
+  isPlayableArtifact,
+} from "@/lib/domain";
 import { event } from "@/lib/runner";
 export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
@@ -20,6 +25,11 @@ export async function GET(req: Request) {
 }
 const id = z.string().min(1).max(100);
 const action = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("budget"),
+    id,
+    maxTokens: z.number().int().min(10000).max(200000),
+  }),
   z.object({
     action: z.literal("team"),
     name: z.string().trim().min(1).max(40),
@@ -90,6 +100,29 @@ export async function POST(req: Request) {
       } else {
         const m = ws.missions.find((v) => v.id === a.id);
         if (!m) throw new Error("Mission not found.");
+        if (a.action === "budget") {
+          if (
+            m.status === "running" ||
+            (m.leaseUntil && m.leaseUntil > Date.now())
+          )
+            throw new Error(
+              "Pause and let the current step finish before changing its budget.",
+            );
+          if (a.maxTokens < m.tokens)
+            throw new Error(
+              "The budget cannot be lower than tokens already used.",
+            );
+          const previous = m.maxTokens;
+          m.maxTokens = a.maxTokens;
+          if (m.budgetRequiredTotal && a.maxTokens >= m.budgetRequiredTotal)
+            delete m.budgetRequiredTotal;
+          event(
+            m,
+            "You",
+            "budget",
+            `Changed the mission budget from ${previous.toLocaleString()} to ${a.maxTokens.toLocaleString()} tokens. Completed work and usage are preserved.`,
+          );
+        }
         if (a.action === "message") {
           const agent = a.agentId
             ? ws.agents.find((v) => v.id === a.agentId && v.teamId === m.teamId)
@@ -144,7 +177,7 @@ export async function POST(req: Request) {
               throw new Error(
                 "Finish the mission and review the deliverables first.",
               );
-            if (!m.artifacts.some((v) => v.type === "html"))
+            if (!m.artifacts.some(isPlayableArtifact))
               throw new Error(
                 "There is no playable app to launch. You can still export the documents.",
               );
@@ -162,7 +195,7 @@ export async function POST(req: Request) {
               );
             if (m.tokens >= m.maxTokens)
               throw new Error(
-                "Token budget reached. Start a follow-up mission.",
+                "Update this mission’s budget to continue. Completed work is saved.",
               );
             m.status = "running";
             if (m.tasks[m.step]?.status === "blocked")

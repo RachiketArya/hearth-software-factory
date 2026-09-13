@@ -1,3 +1,4 @@
+import { isPlayableArtifact } from "@/lib/domain";
 import { headers } from "next/headers";
 import { read } from "@/lib/store";
 import { safeDocument } from "@/lib/sandbox";
@@ -27,7 +28,7 @@ export default async function Play({
   const m = workspace.missions.find(
     (m) => m.id === id && m.status === "complete",
   );
-  const a = m?.artifacts.filter((a) => a.type === "html").at(-1);
+  const a = m?.artifacts.filter(isPlayableArtifact).at(-1);
   if (!a)
     return (
       <main className="empty-view">

@@ -37,6 +37,7 @@ import {
   Mission,
   pinballPrompt,
   roles,
+  isPlayableArtifact,
 } from "@/lib/domain";
 import { safeDocument } from "@/lib/sandbox";
 import {
@@ -116,7 +117,7 @@ export default function Page() {
     [missionId, setMissionId] = useState(""),
     [agent, setAgent] = useState<Agent | null>(null),
     [modal, setModal] = useState<
-      "mission" | "team" | "settings" | "collaborate" | null
+      "mission" | "team" | "settings" | "collaborate" | "budget" | null
     >(null),
     [view, setView] = useState("office"),
     [prompt, setPrompt] = useState(pinballPrompt),
@@ -332,6 +333,23 @@ export default function Page() {
       setMissionId(r.workspace.missions[0].id);
       setModal(null);
     }
+  };
+  const openBudget = () => {
+    if (!mission) return;
+    setBudget(
+      String(
+        Math.min(
+          200000,
+          Math.max(
+            mission.maxTokens,
+            Math.ceil(
+              (mission.budgetRequiredTotal || mission.maxTokens) / 1000,
+            ) * 1000,
+          ),
+        ),
+      ),
+    );
+    setModal("budget");
   };
   const control = async (command: string) => {
     if (!mission) return;
@@ -573,7 +591,11 @@ export default function Page() {
             {view === "office" ? (
               <Office
                 agents={agents}
-                mission={mission?.mode === "live" && !connected ? {...mission, status: "paused"} : mission}
+                mission={
+                  mission?.mode === "live" && !connected
+                    ? { ...mission, status: "paused" }
+                    : mission
+                }
                 onAgent={inspect}
                 zoom={zoom}
               />
@@ -712,12 +734,12 @@ export default function Page() {
                           onClick={() => {
                             setArtifact(a);
                             setArtifactView(
-                              a.type === "html" ? "preview" : "source",
+                              isPlayableArtifact(a) ? "preview" : "source",
                             );
                           }}
                         >
                           <span className={`file-icon ${a.type}`}>
-                            {a.type === "html" ? (
+                            {isPlayableArtifact(a) ? (
                               <Play size={22} />
                             ) : (
                               <FileText size={22} />
@@ -727,7 +749,7 @@ export default function Page() {
                             <b>{a.name}</b>
                             <small>
                               {a.agent} · {Math.ceil(a.content.length / 1024)}{" "}
-                              KB{a.type === "html" ? " · Playable app" : ""}
+                              KB{isPlayableArtifact(a) ? " · Playable app" : ""}
                             </small>
                           </span>
                           <ArrowUpRight size={17} />
@@ -799,13 +821,52 @@ export default function Page() {
                       : mission.status}
                   </span>
                 </div>
+                {mission.mode === "live" && (
+                  <div className="mission-budget-row">
+                    <span>
+                      {mission.tokens.toLocaleString()} /{" "}
+                      {mission.maxTokens.toLocaleString()} tokens ·{" "}
+                      {Math.max(
+                        0,
+                        mission.maxTokens - mission.tokens,
+                      ).toLocaleString()}{" "}
+                      remaining
+                    </span>
+                    <button
+                      className="text-button"
+                      disabled={busy || mission.status === "running"}
+                      onClick={openBudget}
+                    >
+                      Adjust budget
+                    </button>
+                  </div>
+                )}
+                {mission.budgetRequiredTotal && (
+                  <div className="connection-notice">
+                    Budget pause. Your files are saved. The next turn needs a
+                    total allowance of at least{" "}
+                    {mission.budgetRequiredTotal.toLocaleString()} tokens.
+                  </div>
+                )}
                 <Progress
                   value={(done / mission.tasks.length) * 100}
                   aria-label="Mission completion"
                   className="mission-progress"
                 />
-                {mission.status === "running" && mission.mode === "live" && !connected && <div className="connection-notice"><span>Waiting for a model connection.</span><button className="text-button" onClick={() => setModal("settings")}>Connect model</button></div>}
-                    <div className="mission-controls">
+                {mission.status === "running" &&
+                  mission.mode === "live" &&
+                  !connected && (
+                    <div className="connection-notice">
+                      <span>Waiting for a model connection.</span>
+                      <button
+                        className="text-button"
+                        onClick={() => setModal("settings")}
+                      >
+                        Connect model
+                      </button>
+                    </div>
+                  )}
+                <div className="mission-controls">
                   <div>
                     {mission.status === "running" ? (
                       <button
@@ -840,7 +901,7 @@ export default function Page() {
                         className="primary"
                         disabled={
                           busy ||
-                          !mission.artifacts.some((a) => a.type === "html")
+                          !mission.artifacts.some((a) => isPlayableArtifact(a))
                         }
                         onClick={() => control("launch")}
                       >
@@ -858,13 +919,13 @@ export default function Page() {
                         <ExternalLink size={14} />
                       </a>
                     )}
-                    {mission.artifacts.some((a) => a.type === "html") && (
+                    {mission.artifacts.some((a) => isPlayableArtifact(a)) && (
                       <button
                         className="secondary"
                         onClick={() => {
                           setArtifact(
                             mission.artifacts
-                              .filter((a) => a.type === "html")
+                              .filter((a) => isPlayableArtifact(a))
                               .at(-1)!,
                           );
                           setArtifactView("preview");
@@ -976,7 +1037,12 @@ export default function Page() {
                         </div>
                         <p>{e.text}</p>
                         {e.tokens && (
-                          <small>{e.tokens.toLocaleString()} tokens</small>
+                          <small>
+                            {e.tokens.toLocaleString()} tokens
+                            {e.inputTokens !== undefined
+                              ? ` · ${e.inputTokens.toLocaleString()} in / ${(e.outputTokens || 0).toLocaleString()} out`
+                              : ""}
+                          </small>
                         )}
                       </div>
                     </div>
@@ -1069,6 +1135,58 @@ export default function Page() {
           <span>Made for humans working with agents</span>
         </footer>
       </div>
+      <Dialog
+        open={modal === "budget"}
+        onOpenChange={(v) => !v && setModal(null)}
+      >
+        <DialogContent className="hearth-dialog">
+          <DialogTitle>Continue with the work you have</DialogTitle>
+          <DialogDescription>
+            Change this mission’s total token allowance. Completed steps, files,
+            and usage stay intact.
+          </DialogDescription>
+          <p>
+            {mission?.tokens.toLocaleString()} tokens used of{" "}
+            {mission?.maxTokens.toLocaleString()} allowed.
+          </p>
+          <label className="field-label" htmlFor="mission-budget-update">
+            Total mission token budget
+          </label>
+          <input
+            id="mission-budget-update"
+            className="text-input"
+            type="number"
+            min={Math.max(10000, mission?.tokens || 0)}
+            max="200000"
+            step="1000"
+            value={budget}
+            onChange={(e) => setBudget(e.target.value)}
+          />
+          <p className="help-copy">
+            This is the total, including tokens already used. Updating does not
+            start a model call. Resume the mission when ready.
+          </p>
+          <button
+            className="primary"
+            disabled={
+              busy ||
+              !mission ||
+              Number(budget) < Math.max(10000, mission.tokens) ||
+              Number(budget) > 200000
+            }
+            onClick={async () => {
+              const r = await mutate({
+                action: "budget",
+                id: mission?.id,
+                maxTokens: Number(budget),
+              });
+              if (r) setModal(null);
+            }}
+          >
+            Save budget
+          </button>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={modal === "mission"}
         onOpenChange={(v) => !v && setModal(null)}
@@ -1359,7 +1477,8 @@ export default function Page() {
             </p>
             <p>
               <b>Usage</b>Live calls use your API account. Each mission has a
-              token budget; token estimates before calls are approximate.
+              token budget. Input tokens are measured before generation; reviews
+              have smaller output allowances.
             </p>
           </div>
           <button className="primary" onClick={() => setModal(null)}>
@@ -1463,7 +1582,7 @@ export default function Page() {
       </Dialog>
       <Dialog open={!!artifact} onOpenChange={(v) => !v && setArtifact(null)}>
         <DialogContent
-          className={`artifact-dialog ${artifact?.type === "html" ? "game-dialog" : ""}`}
+          className={`artifact-dialog ${artifact && isPlayableArtifact(artifact) ? "game-dialog" : ""}`}
         >
           <div className="artifact-dialog-top">
             <div>
@@ -1482,7 +1601,7 @@ export default function Page() {
                 download(
                   artifact.name,
                   artifact.content,
-                  artifact.type === "html" ? "text/html" : "text/markdown",
+                  isPlayableArtifact(artifact) ? "text/html" : "text/markdown",
                 )
               }
             >
@@ -1490,7 +1609,7 @@ export default function Page() {
               Download
             </button>
           </div>
-          {artifact?.type === "html" && (
+          {artifact && isPlayableArtifact(artifact) && (
             <Tabs value={artifactView} onValueChange={setArtifactView}>
               <TabsList>
                 <TabsTrigger value="preview">Play preview</TabsTrigger>
@@ -1498,7 +1617,9 @@ export default function Page() {
               </TabsList>
             </Tabs>
           )}
-          {artifact?.type === "html" && artifactView === "preview" ? (
+          {artifact &&
+          isPlayableArtifact(artifact) &&
+          artifactView === "preview" ? (
             <iframe
               className="artifact-preview"
               title="Playable app preview"
